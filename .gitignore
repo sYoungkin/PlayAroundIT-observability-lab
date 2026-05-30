@@ -1,0 +1,23 @@
+# Vagrant
+.vagrant/
+
+# OS garbage
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Splunk artifacts we don't want in the repo
+*.spl
+*.tgz
+*.tar.gz
+
+# SSH keys
+.ssh/

@@ -1,0 +1,100 @@
+ENV["VAGRANT_DEFAULT_PROVIDER"] = "vmware_desktop"
+Vagrant.require_version ">= 2.3.0"
+BOX_IMAGE = "generic/ubuntu2204"
+
+MGMT = 2
+IDX  = 2
+SH   = 2
+UF   = 1
+
+Vagrant.configure("2") do |config|
+  config.vagrant.plugins = ["vagrant-vmware-desktop"]
+  config.vm.box = BOX_IMAGE
+  config.vm.provider "vmware_desktop" do |v|
+    v.cpus   = 1
+    v.memory = 1024
+  end
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  # Inject Ansible public key into every VM
+  config.vm.provision "shell" do |s|
+    pub_key = File.read(File.join(__dir__, "../.ssh/ansible_lab.pub"))
+    s.inline = <<-SHELL
+      echo "#{pub_key}" >> /home/vagrant/.ssh/authorized_keys
+      chmod 600 /home/vagrant/.ssh/authorized_keys
+    SHELL
+  end
+
+  # Elastic/Kibana/Ansible control node
+  config.vm.define "elastic" do |subconfig|
+    subconfig.vm.hostname = "elastic"
+    subconfig.vm.provider "vmware_desktop" do |v|
+      v.cpus   = 1
+      v.memory = 2048
+    end
+    subconfig.vm.provision "file",
+      source:      "../.ssh/ansible_lab",
+      destination: "/tmp/ansible_lab"
+    subconfig.vm.provision "shell", inline: <<-SHELL
+      mkdir -p /root/.ssh
+      cp /tmp/ansible_lab /root/.ssh/ansible_lab
+      chmod 600 /root/.ssh/ansible_lab
+      chown root:root /root/.ssh/ansible_lab
+      rm /tmp/ansible_lab
+    SHELL
+    #subconfig.vm.provision "shell",
+     # path: "../scripts/elastic_install.sh",
+     # env: { "ADMIN_PWD" => "adminuser123!" }
+    subconfig.vm.provision "file",
+      source:      "../ansible/",
+      destination: "/tmp/ansible"
+    subconfig.vm.provision "shell", inline: <<-SHELL
+      cp -r /tmp/ansible/. /etc/ansible/
+      chown -R root:root /etc/ansible/
+      chmod 644 /etc/ansible/ansible.cfg 2>/dev/null || true
+      echo "[INFO] Ansible directory contents:"
+      find /etc/ansible -type f
+    SHELL
+  end
+
+  # Splunk management nodes
+  (1..MGMT).each do |i|
+    config.vm.define "mgmt-#{i}" do |subconfig|
+      subconfig.vm.hostname = "mgmt-#{i}"
+      #subconfig.vm.provision "shell",
+       # path: "../scripts/splunk_install.sh",
+       # env: { "ADMIN_PWD" => "adminuser123!" }
+    end
+  end
+
+  # Splunk indexer nodes
+  (1..IDX).each do |i|
+    config.vm.define "idx-#{i}" do |subconfig|
+      subconfig.vm.hostname = "idx-#{i}"
+      subconfig.vm.provision "shell",
+        path: "../scripts/splunk_install.sh",
+        env: { "ADMIN_PWD" => "adminuser123!" }
+    end
+  end
+
+  # Splunk search head nodes
+  (1..SH).each do |i|
+    config.vm.define "sh-#{i}" do |subconfig|
+      subconfig.vm.hostname = "sh-#{i}"
+      subconfig.vm.provision "shell",
+        path: "../scripts/splunk_install.sh",
+        env: { "ADMIN_PWD" => "adminuser123!" }
+    end
+  end
+
+  # Splunk UF nodes
+  (1..UF).each do |i|
+    config.vm.define "uf-#{i}" do |subconfig|
+      subconfig.vm.hostname = "uf-#{i}"
+      subconfig.vm.provision "shell",
+        path: "../scripts/splunk_uf_install.sh",
+        env: { "ADMIN_PWD" => "adminuser123!" }
+    end
+  end
+
+end
