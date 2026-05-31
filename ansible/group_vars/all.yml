@@ -1,0 +1,12 @@
+# Elasticsearch connection
+elasticsearch_host: "{{ hostvars['elastic']['ansible_host'] }}"
+elasticsearch_port: 9200
+elasticsearch_username: "elastic"
+elasticsearch_password: "{{ vault_elasticsearch_password }}"
+
+# CA cert path for Splunk nodes
+# Overridden for elastic node via host_vars
+elasticsearch_ca_cert: "/etc/metricbeat/certs/http_ca.crt"
+
+# Metricbeat
+metricbeat_version: "9.x"

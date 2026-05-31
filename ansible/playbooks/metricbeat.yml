@@ -1,0 +1,164 @@
+---
+# ============================================
+#  Observability Lab - Metricbeat Deployment
+#  Deploys and configures Metricbeat across
+#  all lab nodes
+# ============================================
+
+# ----------------------------------------
+#  Play 1 - Distribute Elasticsearch CA
+#  cert to all Splunk nodes
+# ----------------------------------------
+- name: Distribute Elasticsearch CA certificate to Splunk nodes
+  hosts: splunk_all
+  become: true
+
+  tasks:
+
+    - name: Create certs directory on target node
+      file:
+        path: /etc/metricbeat/certs
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Fetch CA cert from elastic node
+      fetch:
+        src: /etc/elasticsearch/certs/http_ca.crt
+        dest: /tmp/http_ca.crt
+        flat: true
+      delegate_to: elastic
+
+    - name: Copy CA cert to target node
+      copy:
+        src: /tmp/http_ca.crt
+        dest: /etc/metricbeat/certs/http_ca.crt
+        owner: root
+        group: root
+        mode: '0644'
+
+# ----------------------------------------
+#  Play 2 - Install Metricbeat on all nodes
+# ----------------------------------------
+- name: Install and configure Metricbeat on all nodes
+  hosts: lab_all
+  become: true
+
+  tasks:
+
+    - name: Install apt dependencies
+      apt:
+        name:
+          - wget
+          - curl
+          - gnupg
+          - apt-transport-https
+          - ca-certificates
+        state: present
+        update_cache: true
+
+    - name: Add Elastic GPG key
+      shell: |
+        wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch \
+          | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/elasticsearch-keyring.gpg
+
+    - name: Add Elastic APT repository
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ metricbeat_version }}/apt stable main"
+        state: present
+        filename: "elastic-{{ metricbeat_version }}"
+
+    - name: Install Metricbeat
+      apt:
+        name: metricbeat
+        state: present
+        update_cache: true
+
+    - name: Configure Metricbeat output to Elasticsearch
+      template:
+        src: templates/metricbeat.yml.j2
+        dest: /etc/metricbeat/metricbeat.yml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable system module
+      command: metricbeat modules enable system
+      args:
+        creates: /etc/metricbeat/modules.d/system.yml
+
+    - name: Enable linux module
+      command: metricbeat modules enable linux
+      args:
+        creates: /etc/metricbeat/modules.d/linux.yml
+
+    - name: Enable beat-xpack module
+      command: metricbeat modules enable beat-xpack
+      args:
+        creates: /etc/metricbeat/modules.d/beat-xpack.yml
+
+    - name: Enable and start Metricbeat
+      systemd:
+        name: metricbeat
+        enabled: true
+        state: started
+
+# ----------------------------------------
+#  Play 3 - Additional modules for elastic
+#  node only
+# ----------------------------------------
+- name: Enable Elasticsearch and Kibana modules on elastic node
+  hosts: elastic
+  become: true
+
+  tasks:
+
+    - name: Enable elasticsearch-xpack module
+      command: metricbeat modules enable elasticsearch-xpack
+      args:
+        creates: /etc/metricbeat/modules.d/elasticsearch-xpack.yml
+
+    - name: Enable kibana-xpack module
+      command: metricbeat modules enable kibana-xpack
+      args:
+        creates: /etc/metricbeat/modules.d/kibana-xpack.yml
+
+    - name: Configure elasticsearch-xpack module
+      copy:
+        dest: /etc/metricbeat/modules.d/elasticsearch-xpack.yml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          - module: elasticsearch
+            xpack.enabled: true
+            period: 10s
+            hosts:
+              - "https://localhost:9200"
+            username: "{{ elasticsearch_username }}"
+            password: "{{ elasticsearch_password }}"
+            ssl.certificate_authorities:
+              - "{{ elasticsearch_ca_cert }}"
+
+    - name: Configure kibana-xpack module
+      copy:
+        dest: /etc/metricbeat/modules.d/kibana-xpack.yml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          - module: kibana
+            xpack.enabled: true
+            period: 10s
+            hosts:
+              - "http://localhost:5601"
+            username: "{{ elasticsearch_username }}"
+            password: "{{ elasticsearch_password }}"
+
+    - name: Restart Metricbeat to pick up new modules
+      systemd:
+        name: metricbeat
+        state: restarted

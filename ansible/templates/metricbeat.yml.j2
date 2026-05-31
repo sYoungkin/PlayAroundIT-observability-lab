@@ -1,0 +1,36 @@
+# ============================================
+#  Metricbeat Configuration
+#  Managed by Ansible - do not edit manually
+# ============================================
+
+metricbeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+# Output to Elasticsearch
+output.elasticsearch:
+  hosts:
+    - "https://{{ elasticsearch_host }}:{{ elasticsearch_port }}"
+  username: "{{ elasticsearch_username }}"
+  password: "{{ elasticsearch_password }}"
+  ssl.certificate_authorities:
+    - "{{ elasticsearch_ca_cert }}"
+
+# Kibana for dashboards
+setup.kibana:
+  host: "http://{{ elasticsearch_host }}:5601"
+  username: "{{ elasticsearch_username }}"
+  password: "{{ elasticsearch_password }}"
+
+# Index settings
+setup.ilm.enabled: true
+setup.template.enabled: true
+
+# Logging
+logging.level: warning
+logging.to_files: true
+logging.files:
+  path: /var/log/metricbeat
+  name: metricbeat
+  keepfiles: 7
+  permissions: 0644

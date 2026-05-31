@@ -1,0 +1,3 @@
+# Override CA cert path for elastic node only
+# Uses the local Elasticsearch cert directly
+elasticsearch_ca_cert: "/etc/elasticsearch/certs/http_ca.crt"
