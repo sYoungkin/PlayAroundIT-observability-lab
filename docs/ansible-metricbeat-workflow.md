@@ -8,7 +8,7 @@ This document covers the complete manual workflow from a freshly provisioned lab
 
 After `vagrant up` completes, the elastic node has:
 - Elasticsearch and Kibana running
-- Ansible installed
+- Ansible installed and upgraded to latest version via pip3
 - All playbooks, templates, and group_vars copied to `/etc/ansible/`
 - Ansible private key at `/root/.ssh/ansible_lab`
 - Public key injected into all other VMs
@@ -25,7 +25,7 @@ Run on your local machine after provisioning:
 bash scripts/lab_status.sh
 ```
 
-Note the IP address of every running VM. You will need these for the next two steps.
+Note the IP address of every running VM. You will need these for the inventory update.
 
 ---
 
@@ -44,11 +44,13 @@ Edit the inventory file:
 vi /etc/ansible/inventory/hosts.ini
 ```
 
-Replace all placeholder IPs with the actual values from `lab_status.sh`. The elastic node entry uses localhost and does not need an IP:
+Replace all placeholder IPs with the actual values from `lab_status.sh`.
+
+> **Important:** The elastic node entry uses `ansible_connection=local` only — no `ansible_host` is set. Ansible discovers the elastic node's real IP automatically via fact gathering at runtime.
 
 ```ini
-[elastic]
-elastic ansible_host=127.0.0.1 ansible_connection=local
+[elastic_node]
+elastic ansible_connection=local
 
 [splunk_management]
 mgmt-1 ansible_host=192.168.x.x
@@ -72,7 +74,7 @@ splunk_search_heads
 splunk_forwarders
 
 [lab_all:children]
-elastic
+elastic_node
 splunk_all
 
 [all:vars]
@@ -80,27 +82,11 @@ ansible_user=vagrant
 ansible_ssh_private_key_file=/root/.ssh/ansible_lab
 ```
 
----
-
-## Step 3 — Create the Ansible Vault
-
-The Elasticsearch password is stored in an encrypted vault file. This file is never committed to the repo and must be created manually on the elastic node after every fresh provision.
-
-```bash
-ansible-vault create /etc/ansible/group_vars/vault.yml
-```
-
-You will be prompted to set a vault password. Enter and confirm it. When the editor opens add:
-
-```yaml
-vault_elasticsearch_password: "adminuser123!"
-```
-
-Save and exit. The file is now encrypted on disk.
+> **Note:** The group is named `[elastic_node]` not `[elastic]` to avoid a naming conflict between the group name and the hostname `elastic`. The hostname itself remains `elastic`.
 
 ---
 
-## Step 4 — Create the Vault Password File
+## Step 3 — Create the Vault Password File
 
 Store the vault password in a local file so you do not have to type it on every playbook run:
 
@@ -113,9 +99,30 @@ This file stays on the elastic node only and is never committed to the repo.
 
 ---
 
+## Step 4 — Create the Ansible Vault
+
+The Elasticsearch password is stored in an encrypted vault file. This file is never committed to the repo and must be created manually on the elastic node after every fresh provision.
+
+> **Critical:** The vault file must be created inside `/etc/ansible/inventory/group_vars/all/` — the same directory as `all.yml`. Ansible only auto-loads vault files when they are co-located with the other group_vars files next to the inventory.
+
+```bash
+ansible-vault create /etc/ansible/inventory/group_vars/all/vault.yml \
+  --vault-password-file /root/.vault_pass
+```
+
+When the editor opens add:
+
+```yaml
+vault_elasticsearch_password: "adminuser123!"
+```
+
+Save and exit. The file is now encrypted on disk.
+
+---
+
 ## Step 5 — Verify Ansible Configuration
 
-Confirm the Ansible config file is in place:
+Confirm the Ansible config file is in place and correct:
 
 ```bash
 cat /etc/ansible/ansible.cfg
@@ -127,9 +134,12 @@ Expected content:
 [defaults]
 host_key_checking = False
 private_key_file = /root/.ssh/ansible_lab
+inventory = /etc/ansible/inventory/hosts.ini
+roles_path = /etc/ansible/roles
+vault_password_file = /root/.vault_pass
 ```
 
-Confirm the private key is present:
+Confirm the private key is present with correct permissions:
 
 ```bash
 ls -la /root/.ssh/ansible_lab
@@ -137,19 +147,61 @@ ls -la /root/.ssh/ansible_lab
 
 Expected: file exists with permissions `600` owned by `root`.
 
----
-
-## Step 6 — Validate Ansible Connectivity
-
-Test connectivity to all hosts before running any playbook:
+Confirm the Ansible files were correctly copied from the repo:
 
 ```bash
-ansible all -i /etc/ansible/inventory/hosts.ini \
-  -m ping \
+find /etc/ansible -type f
+```
+
+Expected: playbooks, templates, inventory, group_vars, host_vars, and ansible.cfg all present.
+
+---
+
+## Step 6 — Verify Vault is Correct
+
+Confirm the vault file exists in the correct location:
+
+```bash
+ls -la /etc/ansible/inventory/group_vars/all/
+```
+
+Expected: both `all.yml` and `vault.yml` present in the `all/` subdirectory.
+
+Confirm the vault file is encrypted:
+
+```bash
+cat /etc/ansible/inventory/group_vars/all/vault.yml
+```
+
+Expected: encrypted ciphertext starting with `$ANSIBLE_VAULT;1.1;AES256` — not readable plaintext.
+
+Decrypt and verify the contents:
+
+```bash
+ansible-vault view /etc/ansible/inventory/group_vars/all/vault.yml \
   --vault-password-file /root/.vault_pass
 ```
 
-**Expected output for each host:**
+Expected output:
+
+```yaml
+vault_elasticsearch_password: "adminuser123!"
+```
+
+> **Note:** The `ansible -m debug` command for checking vault variable resolution can show "VARIABLE IS NOT DEFINED" even when the vault is correctly configured. Use the vault view command above as the definitive verification instead.
+
+---
+
+## Step 7 — Validate Ansible Connectivity
+
+Test connectivity to all provisioned hosts:
+
+```bash
+cd /etc/ansible
+ansible all -m ping
+```
+
+Expected output for each host:
 
 ```
 mgmt-1 | SUCCESS => {
@@ -158,79 +210,38 @@ mgmt-1 | SUCCESS => {
 }
 ```
 
-Every host must return `SUCCESS` before proceeding. If any host fails see the troubleshooting section below.
+Every host must return `SUCCESS` before proceeding.
 
 Confirm Ansible can run commands across all hosts:
 
 ```bash
-ansible all -i /etc/ansible/inventory/hosts.ini \
-  -m command -a "date" \
-  --vault-password-file /root/.vault_pass
+ansible all -m command -a "date"
 ```
 
 Every host should return the current date and time.
 
----
-
-## Step 7 — Verify Vault is Correct
-
-Confirm the vault file exists and is in the right place:
-
-```bash
-ls -la /etc/ansible/group_vars/
-```
-
-**Expected:** `vault.yml` is present in the directory.
-
-Confirm the vault file is encrypted and not empty:
-
-```bash
-cat /etc/ansible/group_vars/vault.yml
-```
-
-**Expected:** Encrypted ciphertext — not readable plaintext.
-
-Decrypt and view the vault contents to confirm the password is correct
-and the vault password file works:
-
-```bash
-ansible-vault view /etc/ansible/group_vars/vault.yml \
-  --vault-password-file /root/.vault_pass
-```
-
-**Expected:** Decrypted output showing:
-
-```yaml
-vault_elasticsearch_password: "changeme"
-```
-
-If decryption succeeds and the password is correct, the vault is
-configured correctly and you can proceed to Step 8.
-
-> Note: The `ansible -m debug` command for checking vault variable
-> resolution can show "VARIABLE IS NOT DEFINED" even when the vault
-> is correctly configured. Use the vault view command above as the
-> definitive verification instead.
+> **Note:** Since `inventory` and `vault_password_file` are defined in `ansible.cfg`, the `-i` and `--vault-password-file` flags are not required when running from `/etc/ansible/`. Always run Ansible commands from `/etc/ansible/`.
 
 ---
 
 ## Step 8 — Deploy Metricbeat
 
-Run the Metricbeat playbook against all nodes:
+Run the Metricbeat playbook:
 
 ```bash
-ansible-playbook /etc/ansible/playbooks/metricbeat.yml \
-  -i /etc/ansible/inventory/hosts.ini \
-  --vault-password-file /root/.vault_pass
+cd /etc/ansible
+ansible-playbook playbooks/metricbeat.yml
 ```
 
 The playbook will:
-1. Copy the Elasticsearch CA certificate from the elastic node to all Splunk nodes
-2. Install Metricbeat on all nodes from the Elastic 9.x APT repository
-3. Deploy the Metricbeat configuration via Jinja2 template
-4. Enable `system`, `linux`, and `beat-xpack` modules on all nodes
-5. Enable `elasticsearch-xpack` and `kibana-xpack` modules on the elastic node only
-6. Start and enable the Metricbeat service on all nodes
+1. Gather facts from all hosts — required so the elastic node's real IP is available to all other nodes
+2. Copy the Elasticsearch CA certificate from the elastic node to all Splunk nodes
+3. Install Metricbeat on all nodes from the Elastic 9.x APT repository
+4. Deploy the Metricbeat configuration via Jinja2 template
+5. Enable `system`, `linux`, and `beat-xpack` modules on all nodes
+6. Enable `elasticsearch-xpack` and `kibana-xpack` modules on the elastic node only
+7. Start and enable the Metricbeat service on all nodes
+8. Run `metricbeat setup --index-management` on the elastic node
 
 Expected runtime: 3-5 minutes.
 
@@ -241,9 +252,7 @@ Expected runtime: 3-5 minutes.
 ### Service status across all nodes
 
 ```bash
-ansible all -i /etc/ansible/inventory/hosts.ini \
-  -m command -a "systemctl status metricbeat --no-pager" \
-  --vault-password-file /root/.vault_pass
+ansible all -m command -a "systemctl status metricbeat --no-pager"
 ```
 
 All nodes should show `active (running)`.
@@ -268,7 +277,7 @@ curl -s --cacert /etc/elasticsearch/certs/http_ca.crt \
   "https://localhost:9200/_cat/indices?v" | grep metricbeat
 ```
 
-**Expected:** One or more `metricbeat-*` indices with a document count greater than zero.
+Expected: one or more `metricbeat-*` indices with a document count greater than zero.
 
 ### Confirm cluster health
 
@@ -278,19 +287,31 @@ curl -s --cacert /etc/elasticsearch/certs/http_ca.crt \
   "https://localhost:9200/_cluster/health?pretty"
 ```
 
-**Expected:** `"status": "green"` or `"status": "yellow"`. Yellow is normal for a single-node cluster.
+Expected: `"status": "green"` or `"status": "yellow"`. Yellow is normal for a single-node cluster.
 
 ---
 
-## Step 10 — Validate in Kibana
+## Step 10 — Create Data View in Kibana
+
+The `metricbeat setup --index-management` command sets up Elasticsearch assets only. The Kibana data view must be created manually:
 
 1. Open Kibana at `http://<elastic-ip>:5601`
 2. Log in as `elastic` / `adminuser123!`
-3. Navigate to **Management → Stack Management → Index Management**
-4. Confirm `metricbeat-*` indices are present with documents
-5. Navigate to **Discover**, select the `metricbeat-*` data view
-6. Confirm metric documents are appearing with `host.name` fields populated
-7. Navigate to **Observability → Infrastructure** to see host-level metrics
+3. Navigate to **Management → Stack Management → Data Views**
+4. Click **Create data view**
+5. Set name to `metricbeat-*`
+6. Set index pattern to `metricbeat-*`
+7. Set timestamp field to `@timestamp`
+8. Click **Save data view to Kibana**
+
+---
+
+## Step 11 — Validate in Kibana
+
+1. Navigate to **Discover** → select `metricbeat-*` data view
+2. Confirm metric documents are appearing with `host.name` fields populated
+3. Navigate to **Observability → Infrastructure** to see host-level metrics
+4. Confirm all provisioned nodes appear as hosts
 
 ---
 
@@ -319,14 +340,20 @@ The public key was not injected into the target node. Reprovision with `vagrant 
 **Ansible ping fails — Host unreachable:**
 The IP in `hosts.ini` is wrong or the VM is not running. Run `bash scripts/lab_status.sh` and update the inventory.
 
-**group_vars vault variable not resolving:**
-The vault file does not exist or was created with a different password. Re-run Step 3 and confirm the vault password file matches.
+**vault_elasticsearch_password is undefined:**
+The vault file is not in the correct location. It must be at `/etc/ansible/inventory/group_vars/all/vault.yml`. Recreate it in the correct location — see Step 4.
+
+**elasticsearch_host resolves to 127.0.0.1:**
+The elastic node entry in `hosts.ini` has `ansible_host=127.0.0.1` set. Remove `ansible_host` from the elastic entry — only `ansible_connection=local` should be set. The real IP is discovered automatically via fact gathering.
 
 **Metricbeat fails to connect to Elasticsearch on Splunk nodes:**
-The CA cert was not copied correctly. Check `/etc/metricbeat/certs/http_ca.crt` exists on the failing node. Re-run the playbook to retry the cert distribution.
+The CA cert was not copied correctly. Check `/etc/metricbeat/certs/http_ca.crt` exists on the failing node. Re-run the playbook to retry the cert distribution. Also confirm Metricbeat was restarted after the config was updated — restart manually with `systemctl restart metricbeat` if needed.
 
 **No metricbeat indices in Elasticsearch:**
-Check `journalctl -u metricbeat` on the failing node. Confirm the Elasticsearch host IP in `group_vars/all.yml` is correct and port 9200 is reachable from that node.
+Check `journalctl -u metricbeat` on the failing node. Confirm the Elasticsearch host IP in the rendered config is correct: `grep -A3 "output.elasticsearch" /etc/metricbeat/metricbeat.yml`. If it shows `127.0.0.1` the fact gathering play did not run — ensure the playbook starts with the gather facts play.
+
+**Ansible files not copied to elastic node after provisioning:**
+The Vagrant file provisioner runs before the elastic install script creates `/etc/ansible`. Confirm the provisioner order in the Vagrantfile — the install script must run before the file copy provisioners.
 
 **Module not appearing as enabled:**
 Check `/etc/metricbeat/modules.d/` — enabled modules have `.yml` extension, disabled have `.yml.disabled`. Re-run the playbook to re-enable.
@@ -336,8 +363,10 @@ Check `/etc/metricbeat/modules.d/` — enabled modules have `.yml` extension, di
 ## Notes
 
 - Always operate as `root` on the elastic node (`sudo -i`)
+- Always run Ansible commands from `/etc/ansible/` so config file paths resolve correctly
 - The `ansible_user` on all target nodes is `vagrant` — the default Vagrant user
 - Update `hosts.ini` with current IPs after every `vagrant up` using `lab_status.sh`
-- The `metricbeat.yml` config on each node is managed by Ansible — do not edit manually as it will be overwritten on the next playbook run
+- The `metricbeat.yml` config on each node is managed by Ansible via Jinja2 template — do not edit manually as it will be overwritten on the next playbook run
 - `host_key_checking = False` is intentional for this lab — do not use in production
 - The vault file and vault password file must be recreated after every fresh provision of the elastic node
+- The elastic node's IP is resolved dynamically via `ansible_default_ipv4.address` — the fact gathering play at the start of the Metricbeat playbook is required for this to work
