@@ -89,6 +89,26 @@ alias splunk='sudo ${SPLUNK_HOME}/bin/splunk'
 EOF
 chmod 644 /etc/profile.d/splunk-alias.sh
 
+log "Installing auditd..."
+apt-get install -y auditd audispd-plugins
+
+log "Creating audit_readers group..."
+groupadd -f audit_readers
+
+log "Adding splunk user to audit_readers group..."
+usermod -aG audit_readers "$SPLUNK_USER"
+
+log "Configuring auditd log group..."
+sed -i 's/^log_group = .*/log_group = audit_readers/' /etc/audit/auditd.conf
+
+log "Enabling and starting auditd..."
+systemctl enable auditd
+systemctl start auditd
+
+log "Verifying auditd status..."
+systemctl is-active auditd && log "auditd is running." || log "WARNING: auditd failed to start."
+
 log "Splunk Universal Forwarder ${SPLUNK_VERSION} installed and configured."
 log "Startup intentionally deferred for manual configuration."
 log "When ready: systemctl start SplunkForwarder"
+

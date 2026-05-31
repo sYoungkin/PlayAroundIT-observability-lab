@@ -172,19 +172,45 @@ Every host should return the current date and time.
 
 ---
 
-## Step 7 — Verify group_vars Are Loaded
+## Step 7 — Verify Vault is Correct
 
-Confirm Ansible can resolve the vault secret correctly:
+Confirm the vault file exists and is in the right place:
 
 ```bash
-ansible all -i /etc/ansible/inventory/hosts.ini \
-  -m debug -a "var=elasticsearch_password" \
+ls -la /etc/ansible/group_vars/
+```
+
+**Expected:** `vault.yml` is present in the directory.
+
+Confirm the vault file is encrypted and not empty:
+
+```bash
+cat /etc/ansible/group_vars/vault.yml
+```
+
+**Expected:** Encrypted ciphertext — not readable plaintext.
+
+Decrypt and view the vault contents to confirm the password is correct
+and the vault password file works:
+
+```bash
+ansible-vault view /etc/ansible/group_vars/vault.yml \
   --vault-password-file /root/.vault_pass
 ```
 
-**Expected:** Every host returns `"elasticsearch_password": "adminuser123!"` — not the raw vault variable reference.
+**Expected:** Decrypted output showing:
 
-If you see `"elasticsearch_password": "{{ vault_elasticsearch_password }}"` the vault was not created correctly. Repeat Step 3.
+```yaml
+vault_elasticsearch_password: "changeme"
+```
+
+If decryption succeeds and the password is correct, the vault is
+configured correctly and you can proceed to Step 8.
+
+> Note: The `ansible -m debug` command for checking vault variable
+> resolution can show "VARIABLE IS NOT DEFINED" even when the vault
+> is correctly configured. Use the vault view command above as the
+> definitive verification instead.
 
 ---
 

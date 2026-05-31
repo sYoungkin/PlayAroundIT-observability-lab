@@ -42,9 +42,9 @@ Vagrant.configure("2") do |config|
       chown root:root /root/.ssh/ansible_lab
       rm /tmp/ansible_lab
     SHELL
-    #subconfig.vm.provision "shell",
-     # path: "../scripts/elastic_install.sh",
-     # env: { "ADMIN_PWD" => "adminuser123!" }
+    subconfig.vm.provision "shell",
+      path: "../scripts/elastic_install.sh",
+      env: { "ADMIN_PWD" => "adminuser123!" }
     subconfig.vm.provision "file",
       source:      "../ansible/",
       destination: "/tmp/ansible"
@@ -61,9 +61,9 @@ Vagrant.configure("2") do |config|
   (1..MGMT).each do |i|
     config.vm.define "mgmt-#{i}" do |subconfig|
       subconfig.vm.hostname = "mgmt-#{i}"
-      #subconfig.vm.provision "shell",
-       # path: "../scripts/splunk_install.sh",
-       # env: { "ADMIN_PWD" => "adminuser123!" }
+      subconfig.vm.provision "shell",
+        path: "../scripts/splunk_install.sh",
+        env: { "ADMIN_PWD" => "adminuser123!" }
     end
   end
 

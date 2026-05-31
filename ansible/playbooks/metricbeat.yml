@@ -4,7 +4,10 @@
 #  Deploys and configures Metricbeat across
 #  all lab nodes
 # ============================================
-
+- name: Gather facts from all hosts
+  hosts: lab_all
+  become: true
+  gather_facts: true
 # ----------------------------------------
 #  Play 1 - Distribute Elasticsearch CA
 #  cert to all Splunk nodes
@@ -23,16 +26,16 @@
         group: root
         mode: '0755'
 
-    - name: Fetch CA cert from elastic node
-      fetch:
+    - name: Slurp CA cert from elastic node
+      slurp:
         src: /etc/elasticsearch/certs/http_ca.crt
-        dest: /tmp/http_ca.crt
-        flat: true
       delegate_to: elastic
+      run_once: true
+      register: ca_cert_content
 
-    - name: Copy CA cert to target node
+    - name: Write CA cert to target node
       copy:
-        src: /tmp/http_ca.crt
+        content: "{{ ca_cert_content.content | b64decode }}"
         dest: /etc/metricbeat/certs/http_ca.crt
         owner: root
         group: root
@@ -67,7 +70,7 @@
 
     - name: Add Elastic APT repository
       apt_repository:
-        repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ metricbeat_version }}/apt stable main"
+        repo: 'deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ metricbeat_version }}/apt stable main'
         state: present
         filename: "elastic-{{ metricbeat_version }}"
 
@@ -79,7 +82,7 @@
 
     - name: Configure Metricbeat output to Elasticsearch
       template:
-        src: templates/metricbeat.yml.j2
+        src: /etc/ansible/templates/metricbeat.yml.j2
         dest: /etc/metricbeat/metricbeat.yml
         owner: root
         group: root
@@ -157,6 +160,18 @@
               - "http://localhost:5601"
             username: "{{ elasticsearch_username }}"
             password: "{{ elasticsearch_password }}"
+
+    - name: Run Metricbeat index management setup
+      shell: metricbeat setup --index-management
+      ignore_errors: true
+
+    - name: Mark setup complete
+      file:
+        path: /var/lib/metricbeat/.setup_complete
+        state: touch
+        owner: root
+        group: root
+        mode: '0644'
 
     - name: Restart Metricbeat to pick up new modules
       systemd:

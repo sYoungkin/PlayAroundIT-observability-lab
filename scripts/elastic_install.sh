@@ -71,14 +71,16 @@ apt-get install -y kibana
 log "Granting Kibana access to Elasticsearch certificates..."
 usermod -aG elasticsearch kibana
 
-log "Installing Ansible..."
-apt-get install -y ansible
+log "Installing Ansible and pip3..."
+apt-get install -y ansible python3-pip
+
+log "Upgrading Ansible to latest version..."
+pip3 install --upgrade ansible
 
 log "Ansible version: $(ansible --version | head -1)"
 
 log "Creating Ansible workspace..."
-mkdir -p /etc/ansible/playbooks
-mkdir -p /etc/ansible/inventory
+mkdir -p /etc/ansible
 
 log "Setting elastic superuser password via keystore bootstrap..."
 ES_KEYSTORE="/usr/share/elasticsearch/bin/elasticsearch-keystore"

@@ -1,5 +1,5 @@
 # Elasticsearch connection
-elasticsearch_host: "{{ hostvars['elastic']['ansible_host'] }}"
+elasticsearch_host: "{{ hostvars['elastic']['ansible_default_ipv4']['address'] }}"
 elasticsearch_port: 9200
 elasticsearch_username: "elastic"
 elasticsearch_password: "{{ vault_elasticsearch_password }}"
