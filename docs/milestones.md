@@ -4,6 +4,104 @@ This document tracks the build progress of the PlayAroundIT Observability Lab. E
 
 ---
 
+## Milestone 3 — Full Environment Build & Splunk Cluster Configuration
+
+**Status: In Progress**
+
+### Remaining VMs to provision
+- mgmt-2, idx-1, idx-2, sh-1, sh-2
+
+### Steps
+1. `vagrant up mgmt-2 idx-1 idx-2 sh-1 sh-2`
+2. Update `hosts.ini` with all new IPs
+3. Re-run Metricbeat playbook — deploys to all new nodes automatically
+4. Verify all nodes in Kibana Infrastructure dashboard
+5. Configure Splunk secrets across indexer and search head tiers
+6. Configure Cluster Manager and indexer cluster
+7. Configure Search Head Deployer and search head cluster
+8. Configure Deployment Server
+9. Configure License Manager and Monitoring Console
+10. Start Splunk on all nodes
+11. Validate data flow from Universal Forwarder through indexers to search heads
+
+---
+
+## Milestone 2 — Observability & Automation Foundation
+
+**Completed:** 2026-05-31
+
+### What Was Built
+
+#### Ansible Control Node (elastic)
+- Ansible installed and upgraded to latest version via pip3
+- Private key at `/root/.ssh/ansible_lab`
+- Public key injected into all lab VMs via Vagrant global provisioner
+- `ansible.cfg` configured with `host_key_checking = False`, hardcoded inventory path, vault password file reference
+- Inventory structured with named groups: `elastic_node`, `splunk_management`, `splunk_indexers`, `splunk_search_heads`, `splunk_forwarders`, `splunk_all`, `lab_all`
+- `group_vars/all/` subdirectory structure — required for Ansible to auto-load vault alongside plaintext vars
+- Elastic node IP resolved dynamically via `ansible_default_ipv4.address` — no hardcoded IP in inventory or vars
+- Vault encrypted with `ansible-vault` — never committed to repo, created manually post-provision
+
+#### Metricbeat Ansible Playbook
+- Play 1 — Gather facts from all hosts — required for dynamic elastic IP resolution
+- Play 2 — Distribute Elasticsearch CA cert to all Splunk nodes via `slurp` module
+- Play 3 — Install Metricbeat on all nodes from Elastic 9.x APT repo
+- Play 4 — Deploy Metricbeat config via Jinja2 template with dynamic variable injection
+- Play 5 — Enable `system`, `linux`, `beat-xpack` modules on all nodes
+- Play 6 — Enable `elasticsearch-xpack` and `kibana-xpack` modules on elastic node only
+- Play 7 — Run `metricbeat setup --index-management` on elastic node
+- Playbook is fully idempotent — safe to re-run at any time
+
+#### Jinja2 Template (`metricbeat.yml.j2`)
+- Dynamic Elasticsearch host resolved at runtime from gathered facts
+- SSL configured with CA cert path — differs between elastic node and Splunk nodes via `host_vars`
+- Credentials injected from vault-backed group vars
+
+#### group_vars Structure
+- `ansible/inventory/group_vars/all/all.yml` — plaintext variables, committed to repo
+- `ansible/inventory/group_vars/all/vault.yml` — encrypted secrets, never in repo, created manually post-provision
+- `ansible/inventory/host_vars/elastic.yml` — overrides CA cert path for elastic node specifically
+
+#### auditd on Universal Forwarder
+- `auditd` and `audispd-plugins` installed via `splunk_uf_install.sh`
+- `audit_readers` group created
+- `splunk` user added to `audit_readers` group
+- `log_group = audit_readers` configured in `/etc/audit/auditd.conf`
+- auditd enabled and started automatically
+
+---
+
+### Validated
+
+| Component | Test | Result |
+|---|---|---|
+| Elastic node provisioning | Full auto-install of Elasticsearch, Kibana, Ansible | ✓ |
+| Ansible upgrade | pip3 install confirms current version post-provision | ✓ |
+| SSH key distribution | Ansible ping to all nodes returns SUCCESS | ✓ |
+| Ansible vault | Vault decryption and variable resolution confirmed | ✓ |
+| Dynamic elastic IP | `elasticsearch_host` resolves to real IP via fact gathering | ✓ |
+| CA cert distribution | `/etc/metricbeat/certs/http_ca.crt` present on all Splunk nodes | ✓ |
+| Metricbeat on elastic node | system, linux, beat-xpack, elasticsearch-xpack, kibana-xpack modules running | ✓ |
+| Metricbeat on mgmt-1 | system, linux, beat-xpack modules running, data shipping to Elasticsearch | ✓ |
+| Metricbeat on uf-1 | system, linux, beat-xpack modules running, data shipping to Elasticsearch | ✓ |
+| Elasticsearch indices | `metricbeat-*` indices present with documents | ✓ |
+| Kibana Infrastructure | All nodes visible in Observability → Infrastructure dashboard | ✓ |
+| auditd on uf-1 | Service running, audit_readers group created, splunk user member | ✓ |
+
+---
+
+### Key Decisions & Notes
+
+- **Vault file location is critical** — must be at `inventory/group_vars/all/vault.yml` alongside `all.yml`. Placing it at the Ansible root (`/etc/ansible/group_vars/`) causes silent variable resolution failure.
+- **elastic node uses `ansible_connection=local` only** — no `ansible_host` set. Setting `ansible_host=127.0.0.1` causes all other nodes to try to ship Metricbeat data to loopback. Real IP discovered via `ansible_default_ipv4.address` fact.
+- **Fact gathering play is mandatory** — `hosts: lab_all, gather_facts: true` must be the first play in any playbook that references `hostvars['elastic']['ansible_default_ipv4']['address']`. Without it the variable is undefined at render time.
+- **`metricbeat setup --dashboards` not used** — imports legacy Kibana 7 dashboard assets that fail with 500 errors on Kibana 9.x. Using `--index-management` instead for Elasticsearch assets. Kibana data view created manually post-deployment.
+- **CA cert distribution via slurp module** — cleaner than fetch/copy chain. Reads cert content into memory as base64 on elastic node, writes directly to target nodes. No temp files.
+- **Ansible 2.10.8 from Ubuntu APT repos** — too old and has group_vars resolution quirks. Upgraded via pip3 to current version as part of elastic install script.
+- **`[elastic_node]` group name** — not `[elastic]` to avoid Ansible naming conflict between group name and hostname.
+
+---
+
 ## Milestone 1 — Infrastructure Provisioning & Automation Foundation
 
 **Completed:** 2026-05-30
