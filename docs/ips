@@ -3,12 +3,12 @@
 ============================================
   HOSTNAME       IP ADDRESS         STATUS
   ------------------------------------------
-  elastic        192.168.248.181    running
-  mgmt-1         192.168.248.182    running
-  mgmt-2         192.168.248.183    running
-  idx-1          192.168.248.184    running
-  idx-2          192.168.248.185    running
-  sh-1           192.168.248.186    running
-  sh-2           192.168.248.187    running
-  uf-1           192.168.248.188    running
+  elastic        ---                not_created
+  mgmt-1         192.168.248.203    running
+  mgmt-2         192.168.248.204    running
+  idx-1          192.168.248.205    running
+  idx-2          192.168.248.206    running
+  sh-1           192.168.248.207    running
+  sh-2           192.168.248.208    running
+  uf-1           ---                not_created
   ------------------------------------------
