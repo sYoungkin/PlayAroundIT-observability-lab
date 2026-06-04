@@ -14,19 +14,24 @@ The `splunk.secret` file contains the encryption key Splunk uses to encrypt pass
 - Exactly 254 characters
 - Generated automatically on first Splunk start if not already present
 - If the file exists before first start, Splunk uses it as-is and never overwrites it
-- If removed or changed after passwords have been encrypted, all encrypted values become unreadable and Splunk will fail to start or communicate correctly
+- If removed or changed after passwords have been encrypted, all encrypted values become unreadable
 
 ---
 
 ## Why Synchronization is Required
 
-In a distributed Splunk environment, nodes that need to communicate encrypted configuration values must share the same `splunk.secret`. If nodes have different secrets:
+A Splunk cluster will form and function correctly regardless of whether nodes share the same `splunk.secret`. Cluster communication, peer registration, replication, and bundle pushes are not dependent on secret synchronization.
 
-- `pass4SymmKey` values in `server.conf` cannot be validated across nodes
-- Cluster communication between the Cluster Manager and indexer peers fails
-- Search head cluster members cannot decrypt shared configuration
-- LDAP bind passwords configured on one node cannot be used on another
-- Configuration bundle pushes from the Cluster Manager to peers fail
+The reason to synchronize `splunk.secret` is:
+
+**Encrypted passwords in configuration files are portable across nodes only if those nodes share the same secret.**
+
+If nodes have different secrets:
+- LDAP bind passwords configured on one node cannot be decrypted on another
+- Encrypted `pass4SymmKey` values in deployed app configs become unreadable on nodes with a different secret
+- Any app containing encrypted credentials becomes non-portable across the environment
+
+Synchronizing the secret before first start ensures that encrypted credentials in configuration files and deployed apps work consistently across all nodes in the same tier.
 
 ---
 
@@ -47,7 +52,7 @@ Two separate secrets are used — one per tier. Each management node shares the 
 The Search Head Deployer (mgmt-1) needs to share the same secret as the search head cluster members so that encrypted passwords in deployed apps (e.g. LDAP bind passwords configured via the UI) can be decrypted by the search heads without requiring cleartext redeployment.
 
 **Why mgmt-2 shares the indexer secret:**
-The Cluster Manager (mgmt-2) must share the same secret as its indexer peers for cluster communication and configuration bundle distribution to work correctly.
+Encrypted passwords in configuration files are portable across nodes only if those nodes share the same secret. Sharing the secret between the Cluster Manager and its peers ensures that any encrypted credentials in configuration bundles are readable across the indexer tier.
 
 ---
 
@@ -64,14 +69,12 @@ sudo chown splunk:splunk /opt/splunk/etc/auth/splunk.secret
 sudo chmod 400 /opt/splunk/etc/auth/splunk.secret
 ```
 
-**Step 2 — SCP the secret from mgmt-1 to your local machine, then to each search head:**
+**Step 2 — SCP the secret directly from mgmt-1 to each search head:**
 
 ```bash
-# From your WSL terminal on the Windows host
-vagrant scp mgmt-1:/opt/splunk/etc/auth/splunk.secret /tmp/sh_splunk.secret
-
-vagrant scp /tmp/sh_splunk.secret sh-1:/tmp/splunk.secret
-vagrant scp /tmp/sh_splunk.secret sh-2:/tmp/splunk.secret
+# Run from mgmt-1
+scp /opt/splunk/etc/auth/splunk.secret vagrant@<sh1_ip>:/tmp/splunk.secret
+scp /opt/splunk/etc/auth/splunk.secret vagrant@<sh2_ip>:/tmp/splunk.secret
 ```
 
 **Step 3 — On sh-1 and sh-2, move the file into place:**
@@ -95,14 +98,12 @@ sudo chown splunk:splunk /opt/splunk/etc/auth/splunk.secret
 sudo chmod 400 /opt/splunk/etc/auth/splunk.secret
 ```
 
-**Step 2 — SCP the secret from mgmt-2 to your local machine, then to each indexer:**
+**Step 2 — SCP the secret directly from mgmt-2 to each indexer:**
 
 ```bash
-# From your WSL terminal on the Windows host
-vagrant scp mgmt-2:/opt/splunk/etc/auth/splunk.secret /tmp/idx_splunk.secret
-
-vagrant scp /tmp/idx_splunk.secret idx-1:/tmp/splunk.secret
-vagrant scp /tmp/idx_splunk.secret idx-2:/tmp/splunk.secret
+# Run from mgmt-2
+scp /opt/splunk/etc/auth/splunk.secret vagrant@<idx1_ip>:/tmp/splunk.secret
+scp /opt/splunk/etc/auth/splunk.secret vagrant@<idx2_ip>:/tmp/splunk.secret
 ```
 
 **Step 3 — On idx-1 and idx-2, move the file into place:**
@@ -168,4 +169,4 @@ This is useful for auditing which config files contain encrypted passwords befor
 - **Do not rotate the secret after Splunk has started** without also re-encrypting all encrypted values in all config files — this will break the environment if done incorrectly
 - The SHC captain does synchronize some configuration across search head cluster members, but relying on it for initial secret synchronization is not recommended — set the secret manually before first start
 - If you need to rebuild the environment, generate fresh secrets — do not reuse old ones
-- `tee` with `> /dev/null` suppresses output to the terminal so the secret is never visible in your terminal history
+- `tee` with `> /dev/null` suppresses output to the terminal so the secret is never visible in terminal history
