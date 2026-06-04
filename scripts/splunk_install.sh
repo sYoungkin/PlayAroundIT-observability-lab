@@ -45,12 +45,16 @@ if ! id "$SPLUNK_USER" &>/dev/null; then
   useradd --system --create-home --shell /bin/bash "$SPLUNK_USER"
 fi
 
-log "Downloading Splunk Enterprise ${SPLUNK_VERSION}..."
-if [[ ! -f "/opt/${SPLUNK_PACKAGE}" ]]; then
+log "Checking for local Splunk package..."
+if [[ -f "/opt/packages/${SPLUNK_PACKAGE}" ]]; then
+  log "Local package found — copying instead of downloading..."
+  cp "/opt/packages/${SPLUNK_PACKAGE}" "/opt/${SPLUNK_PACKAGE}"
+elif [[ ! -f "/opt/${SPLUNK_PACKAGE}" ]]; then
+  log "Downloading Splunk Enterprise ${SPLUNK_VERSION}..."
   wget -q --show-progress --progress=bar:force:noscroll \
     -O "/opt/${SPLUNK_PACKAGE}" "$SPLUNK_URL"
 else
-  log "Package already exists, skipping download."
+  log "Package already exists, skipping."
 fi
 
 log "Extracting Splunk to /opt..."

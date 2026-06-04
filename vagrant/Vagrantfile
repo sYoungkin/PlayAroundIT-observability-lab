@@ -60,6 +60,7 @@ Vagrant.configure("2") do |config|
   # Splunk management nodes
   (1..MGMT).each do |i|
     config.vm.define "mgmt-#{i}" do |subconfig|
+      subconfig.vm.synced_folder "../packages/splunk", "/opt/packages"
       subconfig.vm.hostname = "mgmt-#{i}"
       subconfig.vm.provision "shell",
         path: "../scripts/splunk_install.sh",
@@ -70,6 +71,7 @@ Vagrant.configure("2") do |config|
   # Splunk indexer nodes
   (1..IDX).each do |i|
     config.vm.define "idx-#{i}" do |subconfig|
+      subconfig.vm.synced_folder "../packages/splunk", "/opt/packages"
       subconfig.vm.hostname = "idx-#{i}"
       subconfig.vm.provision "shell",
         path: "../scripts/splunk_install.sh",
@@ -80,6 +82,7 @@ Vagrant.configure("2") do |config|
   # Splunk search head nodes
   (1..SH).each do |i|
     config.vm.define "sh-#{i}" do |subconfig|
+      subconfig.vm.synced_folder "../packages/splunk", "/opt/packages"
       subconfig.vm.hostname = "sh-#{i}"
       subconfig.vm.provision "shell",
         path: "../scripts/splunk_install.sh",
@@ -90,6 +93,7 @@ Vagrant.configure("2") do |config|
   # Splunk UF nodes
   (1..UF).each do |i|
     config.vm.define "uf-#{i}" do |subconfig|
+      subconfig.vm.synced_folder "../packages/splunk-uf", "/opt/packages"
       subconfig.vm.hostname = "uf-#{i}"
       subconfig.vm.provision "shell",
         path: "../scripts/splunk_uf_install.sh",
