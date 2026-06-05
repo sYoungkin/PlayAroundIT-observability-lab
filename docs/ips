@@ -3,7 +3,7 @@
 ============================================
   HOSTNAME       IP ADDRESS         STATUS
   ------------------------------------------
-  elastic        ---                not_created
+  elastic        192.168.248.210    running
   mgmt-1         192.168.248.203    running
   mgmt-2         192.168.248.204    running
   idx-1          192.168.248.205    running

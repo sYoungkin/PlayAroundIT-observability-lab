@@ -2,29 +2,120 @@
 
 This document tracks the build progress of the PlayAroundIT Observability Lab. Each milestone represents a completed, validated phase of the lab buildout.
 
----
-
 ## Milestone 3 — Full Environment Build & Splunk Cluster Configuration
 
-**Status: In Progress**
+**Completed:** 2026-06-05
 
-### Remaining VMs to provision
-- mgmt-2, idx-1, idx-2, sh-1, sh-2
+### What Was Built
 
-### Steps
-1. `vagrant up mgmt-2 idx-1 idx-2 sh-1 sh-2`
-2. Update `hosts.ini` with all new IPs
-3. Re-run Metricbeat playbook — deploys to all new nodes automatically
-4. Verify all nodes in Kibana Infrastructure dashboard
-5. Configure Splunk secrets across indexer and search head tiers
-6. Configure Cluster Manager and indexer cluster
-7. Configure Search Head Deployer and search head cluster
-8. Configure Deployment Server
-9. Configure License Manager and Monitoring Console
-10. Start Splunk on all nodes
-11. Validate data flow from Universal Forwarder through indexers to search heads
+#### Infrastructure
+- All 6 Splunk VMs provisioned and running
+- Splunk 10.4 installed on all nodes via automated install script
+- Splunk package cache implemented — installer copied from host via Vagrant synced folder, eliminating repeated downloads on reprovision
+- NTP confirmed active on all nodes via `systemd-timesyncd` and VMware Tools clock synchronization
+
+#### Splunk Secret Synchronization
+- Two separate secrets generated and distributed — one per tier
+- Search head tier secret shared across mgmt-1, sh-1, sh-2
+- Indexer tier secret shared across mgmt-2, idx-1, idx-2
+- Secrets generated with `/dev/urandom`, distributed via SCP directly between nodes
+- Verified with `md5sum` across all nodes in each tier
+
+#### Indexer Cluster
+- Cluster Manager configured on mgmt-2 (`pait_cluster_manager_base`)
+- Indexer discovery enabled on Cluster Manager with dedicated `pass4SymmKey`
+- Two indexer peers bootstrapped and registered (`pait_cluster_indexer_base`)
+- Configuration centralized in `manager-apps` after bootstrap
+- Replication factor 2, search factor 2, single-site
+- License Manager running on mgmt-2, both indexers reporting as license peers
+- Splunk data directories created on indexers with volume-based storage:
+  - `hot_tier` → `/opt/splunkdata/hot` (2GB)
+  - `cold_tier` → `/opt/splunkdata/cold` (5GB)
+  - `thawed` → `/opt/splunkdata/thawed`
+
+#### Index Configuration
+- `pait_all_indexes` deployed to indexer cluster — volume-based paths, 3 custom indexes
+- `pait_all_search_indexes` deployed to search head cluster — `$SPLUNK_DB` variable paths for autocomplete without crashing search heads
+- Indexes created: `linux_audit`, `linux_logs`, `nginx_access`
+- Volume configuration confirmed working — hot buckets created under `/opt/splunkdata/hot/linux_audit/`
+
+#### Search Head Cluster
+- Search Head Deployer configured on mgmt-1
+- Two SHC members initialized and bootstrapped
+- Captain elected dynamically — sh-1 elected as initial captain
+- `pait_cluster_search_base` deployed via deployer — search heads connected to indexer cluster
+- License manager configured on all search heads
+
+#### Internal Log Forwarding
+- `pait_cluster_forwarder_outputs` deployed to all non-indexing nodes
+- Indexer discovery used for dynamic indexer routing
+- `index = false` on all non-indexing nodes — no local indexing
+- `useACK = true` — indexer acknowledgement enabled
+- mgmt-1 configured with selective indexing (`index = true`, `selectiveIndexing = true`) for Agent Management `_dsphonehome` and `_dsclient` indexes
+
+#### Agent Management (Deployment Server)
+- mgmt-1 confirmed as Agent Management server
+- uf-1 bootstrapped as deployment client
+- Server class `pait_linux_universal_forwarders` created
+- Apps deployed to UF via Agent Management:
+  - `pait_all_deploymentclient` — points UF to Agent Management
+  - `pait_uf_outputs` — indexer discovery outputs for UF
+  - `Splunk_TA_effective_configuration` — enables config visibility from UI
+- Selective indexing configured on mgmt-1 for Agent Management dashboard visibility
+- Filesystem permissions locked down on deployment-apps sensitive files
+
+#### nginx Load Balancer
+- nginx installed on uf-1
+- Reverse proxy load balancing across sh-1 and sh-2 on port 8000
+- `ip_hash` for session stickiness
+- `proxy_redirect` configured to rewrite Location headers — prevents browser bypassing load balancer on 303 redirects
+- `playaroundit-shc` hostname configured in Windows hosts file
+- Access URL: `http://playaroundit-shc:8000`
+
+#### Monitoring Console
+- Configured on mgmt-2 in distributed mode
+- All Splunk roles assigned — Cluster Manager, License Manager, Indexers, Search Heads, Deployment Server
+- All components visible and healthy in dashboard
+
+#### Splunk Add-on for Unix and Linux
+- Deployed to indexer cluster (index-time extractions)
+- Deployed to search head cluster (search-time extractions, CIM mapping)
+- Deployed to UF via Agent Management with auditd scripted input enabled
+- auditd scripted input uses `ausearch -i` for hex interpretation — ES compatible
+- Data flowing into `linux_audit` index from uf-1
 
 ---
+
+### Validated
+
+| Component | Test | Result |
+|---|---|---|
+| Indexer cluster formation | Both peers Up in CM UI | ✓ |
+| Replication factor met | CM status shows RF=2 satisfied | ✓ |
+| Search head cluster | Captain elected, both members Up | ✓ |
+| Distributed search | Search heads connected to indexer cluster | ✓ |
+| License Manager | Both indexers and search heads reporting | ✓ |
+| Internal log forwarding | `index=_internal host=mgmt-1` returns results on search heads | ✓ |
+| Agent Management | uf-1 visible in dashboard, phone home confirmed | ✓ |
+| Volume storage | Hot buckets present under `/opt/splunkdata/hot/linux_audit/` | ✓ |
+| Index autocomplete | linux_audit, linux_logs, nginx_access visible in search bar | ✓ |
+| nginx load balancer | `http://playaroundit-shc:8000` routes to search heads | ✓ |
+| auditd data onboarding | `index=linux_audit sourcetype=auditd` returns decoded events | ✓ |
+| proctitle decoding | `proctitle` field contains readable command lines | ✓ |
+| Monitoring Console | All components visible in distributed mode | ✓ |
+
+---
+
+### Key Decisions & Notes
+
+- **Two index apps required** — `pait_all_indexes` with volume references for indexers, `pait_all_search_indexes` with `$SPLUNK_DB` variables for search heads. Deploying the volume-based app to search heads crashes Splunk on startup.
+- **Selective indexing on mgmt-1** — required from Splunk 9.2+ for Agent Management dashboards to show connected clients. Without it `_dsphonehome` data lands on indexers and mgmt-1 cannot see it.
+- **nginx on uf-1 not mgmt-1** — avoids port 8000 conflict with Splunk Web on mgmt-1. The UF node has no Splunk Web making it the ideal host.
+- **Source Types UI hidden in SHC** — expected behavior in 10.4. Use REST API instead: `| rest splunk_server=local /services/saved/sourcetypes`
+- **auditd scripted input preferred over file monitor** — `ausearch -i` decodes hex `proctitle` values required for Splunk ES and Threat Research use cases.
+- **Agent Management dashboard** — the forwarder was always connected but invisible because mgmt-1 lacked visibility into `_dsphonehome` index data on the indexers.
+
+--- 
 
 ## Milestone 2 — Observability & Automation Foundation
 

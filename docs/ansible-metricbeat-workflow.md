@@ -106,8 +106,7 @@ The Elasticsearch password is stored in an encrypted vault file. This file is ne
 > **Critical:** The vault file must be created inside `/etc/ansible/inventory/group_vars/all/` — the same directory as `all.yml`. Ansible only auto-loads vault files when they are co-located with the other group_vars files next to the inventory.
 
 ```bash
-ansible-vault create /etc/ansible/inventory/group_vars/all/vault.yml \
-  --vault-password-file /root/.vault_pass
+ansible-vault create /etc/ansible/inventory/group_vars/all/vault.yml 
 ```
 
 When the editor opens add:
@@ -178,8 +177,7 @@ Expected: encrypted ciphertext starting with `$ANSIBLE_VAULT;1.1;AES256` — not
 Decrypt and verify the contents:
 
 ```bash
-ansible-vault view /etc/ansible/inventory/group_vars/all/vault.yml \
-  --vault-password-file /root/.vault_pass
+ansible-vault view /etc/ansible/inventory/group_vars/all/vault.yml 
 ```
 
 Expected output:
