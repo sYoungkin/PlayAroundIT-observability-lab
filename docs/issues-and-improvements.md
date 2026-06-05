@@ -52,6 +52,49 @@ Add an OS tuning block to both install scripts that:
 
 ---
 
+### Issue 3 — Cleartext pass4SymmKey in deployment-apps
+
+**Priority:** Medium
+**Component:** `mgmt-1` — `/opt/splunk/etc/deployment-apps`
+
+Apps in the deployment-apps staging directory may contain cleartext sensitive
+values such as `pass4SymmKey`. Splunk does not auto-encrypt values in this
+directory. Mitigate by locking down filesystem permissions:
+
+```bash
+sudo find /opt/splunk/etc/deployment-apps -type f -exec chmod 600 {} \;
+sudo find /opt/splunk/etc/deployment-apps -type d -exec chmod 700 {} \;
+```
+
+---
+
+### Issue 4 — Remote Upgrade Not Configured for Universal Forwarders
+
+**Priority:** Low
+**Component:** `mgmt-1` — Agent Management, `uf-1` — Universal Forwarder
+
+The Splunk Remote Upgrader for Linux Universal Forwarders is not currently
+configured in this lab. At present, upgrading the Universal Forwarder requires
+manual intervention on each UF node.
+
+The Remote Upgrader is a daemon that runs alongside the Universal Forwarder and
+monitors a predefined directory for new UF packages. When a new package is found
+it performs the upgrade automatically. The upgrader package and new UF binaries
+are distributed via Agent Management.
+
+**Suggested improvement:**
+1. Download `splunk_app_uf_remote_upgrade_linux` from Splunkbase
+2. Place the UF package and its `.sig` signature file in
+   `splunk_app_uf_remote_upgrade_linux/local/packages/`
+3. Copy the app to `/opt/splunk/etc/deployment-apps/` on mgmt-1
+4. Add to the `pait_linux_universal_forwarders` server class
+5. Deploy via Agent Management — the upgrade runs automatically on the UF
+
+**Reference:**
+https://help.splunk.com/en/splunk-enterprise/forward-and-process-data/splunk-remote-upgrader-for-linux-universal-forwarders/10.4/about-the-splunk-remote-upgrader-for-linux-universal-forwarders/about-the-splunk-remote-upgrader-for-linux-universal-forwarders
+
+---
+
 ## Resolved Issues
 
 *None yet.*

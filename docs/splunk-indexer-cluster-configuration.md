@@ -20,6 +20,19 @@ This document covers the complete configuration of the Splunk 10.4 indexer clust
 
 ---
 
+## App Overview
+
+| App | Destination | Purpose |
+|---|---|---|
+| `pait_cluster_manager_base` | mgmt-2 `etc/apps` | Cluster Manager and indexer discovery configuration |
+| `pait_cluster_indexer_base` | mgmt-2 `manager-apps` (after bootstrap) | Indexer peer configuration, inputs, web |
+| `pait_all_indexes` | mgmt-2 `manager-apps` | Index definitions with volume configuration — indexers only |
+| `pait_all_search_indexes` | mgmt-1 `shcluster/apps` | Lightweight index definitions for search head autocomplete |
+
+> **Important:** Two separate index apps are required. `pait_all_indexes` uses volume references that only exist on indexers. Deploying it to search heads causes Splunk to crash on startup. `pait_all_search_indexes` uses `$SPLUNK_DB` variables instead and is safe to deploy to search heads.
+
+---
+
 ## Prerequisites
 
 Before starting any Splunk instance the following must be in place:
@@ -70,6 +83,10 @@ search_factor = 2
 pass4SymmKey = <indexer_cluster_secret>
 cluster_label = playaroundit
 multisite = false
+
+[indexer_discovery]
+pass4SymmKey = <indexer_discovery_secret>
+indexerWeightByDiskCapacity = true
 ```
 
 `metadata/default.meta`:
@@ -104,15 +121,14 @@ sudo systemctl start Splunkd
 
 ## Step 3 — Build pait_cluster_indexer_base
 
-This app bootstraps the indexer peers to the cluster. It is first deployed directly to each indexer's `etc/apps` to establish initial cluster registration, then moved to the Cluster Manager's `manager-apps` for centralized management.
+This app bootstraps the indexer peers to the cluster and configures indexer-specific settings. It does not contain index definitions — those live in `pait_all_indexes`.
 
-**App structure:**
+App structure:
 ```
 pait_cluster_indexer_base/
     default/
         server.conf
         inputs.conf
-        indexes.conf
         web.conf
     metadata/
         default.meta
@@ -141,15 +157,37 @@ manager_uri = https://192.168.248.204:8089
 disabled = false
 ```
 
+`default/web.conf`:
+```ini
+[settings]
+startwebserver = 0
+```
+
+---
+
+## Step 4 — Build pait_all_indexes
+
+This app contains all index definitions and volume configuration. It is deployed to the indexer cluster only.
+
+App structure:
+```
+pait_all_indexes/
+    default/
+        indexes.conf
+    metadata/
+        default.meta
+        local.meta
+```
+
 `default/indexes.conf`:
 ```ini
 [volume:hot_tier]
 path = /opt/splunkdata/hot
-maxVolumeDataSizeMB = 10000
+maxVolumeDataSizeMB = 2000
 
 [volume:cold_tier]
 path = /opt/splunkdata/cold
-maxVolumeDataSizeMB = 20000
+maxVolumeDataSizeMB = 5000
 
 [default]
 repFactor = auto
@@ -157,24 +195,66 @@ tsidxWritingLevel = 4
 homePath   = volume:hot_tier/$_index_name/db
 coldPath   = volume:cold_tier/$_index_name/colddb
 thawedPath = /opt/splunkdata/thawed/$_index_name/thaweddb
+
+[linux_audit]
+maxTotalDataSizeMB = 5120
+frozenTimePeriodInSecs = 2592000
+
+[linux_logs]
+maxTotalDataSizeMB = 5120
+frozenTimePeriodInSecs = 2592000
+
+[nginx_access]
+maxTotalDataSizeMB = 5120
+frozenTimePeriodInSecs = 2592000
 ```
 
-`default/web.conf`:
-```ini
-[settings]
-startwebserver = 0
-```
-
-**Notes on indexes.conf:**
-- Volumes abstract storage tiers — `hot_tier` and `cold_tier` point to separate directories, mirroring how production would use separate physical storage devices
-- `$_index_name` is a Splunk macro that automatically creates per-index subdirectories
+**Notes:**
 - `tsidxWritingLevel = 4` enables the latest TSIDX format for improved search performance
-- `journalCompression` defaults to `zstd` in 10.4 and does not need to be specified explicitly
-- `thawedPath` uses a direct path rather than a volume since thawed data is rarely accessed and does not require volume-based capacity management
+- `journalCompression` defaults to `zstd` in 10.4 — no need to specify explicitly
+- `frozenTimePeriodInSecs = 2592000` = 30 days retention
+- Volume sizes are conservative for lab use — adjust as needed
 
 ---
 
-## Step 4 — Bootstrap Indexer Peers
+## Step 5 — Build pait_all_search_indexes
+
+This app provides index definitions to the search head cluster for search autocomplete. It uses `$SPLUNK_DB` and `$_index_name` variables instead of volume references — this is critical. Deploying `pait_all_indexes` with volume references to search heads causes Splunk to crash on startup because `/opt/splunkdata` does not exist on search heads.
+
+App structure:
+```
+pait_all_search_indexes/
+    default/
+        indexes.conf
+    metadata/
+        default.meta
+        local.meta
+```
+
+`default/indexes.conf`:
+```ini
+[default]
+homePath   = $SPLUNK_DB/$_index_name/db
+coldPath   = $SPLUNK_DB/$_index_name/colddb
+thawedPath = $SPLUNK_DB/$_index_name/thaweddb
+
+[linux_audit]
+
+[linux_logs]
+
+[nginx_access]
+```
+
+**Notes:**
+- Empty stanzas are intentional — all path settings inherit from `[default]`
+- `$SPLUNK_DB` resolves to `/opt/splunk/var/lib/splunk` automatically
+- `$_index_name` resolves to the stanza name automatically
+- Search heads will create these directories locally but never store data in them — all data resides on the indexers
+- No `repFactor`, no volume references, no size limits — search heads do not need these settings
+
+---
+
+## Step 6 — Bootstrap Indexer Peers
 
 ### Initial bootstrap — deploy directly to each indexer
 
@@ -190,8 +270,7 @@ sudo cp -r /tmp/pait_cluster_indexer_base /opt/splunk/etc/apps/
 sudo chown -R splunk:splunk /opt/splunk/etc/apps/pait_cluster_indexer_base
 
 # Add pass4SymmKey in cleartext — Splunk will encrypt on first start
-# Edit /opt/splunk/etc/apps/pait_cluster_indexer_base/default/server.conf
-# Replace <indexer_cluster_secret> with the actual key
+sudo vi /opt/splunk/etc/apps/pait_cluster_indexer_base/default/server.conf
 
 sudo systemctl start Splunkd
 ```
@@ -200,40 +279,53 @@ sudo systemctl start Splunkd
 
 ---
 
-## Step 5 — Move to Manager-Apps for Centralized Management
+## Step 7 — Move to Manager-Apps and Deploy Index Apps
 
-Once peers are registered with the Cluster Manager, move the indexer base app to `manager-apps` so all future configuration changes are managed centrally via the bundle push mechanism.
+Once peers are registered, move `pait_cluster_indexer_base` to `manager-apps`, deploy `pait_all_indexes` to the indexer cluster, and deploy `pait_all_search_indexes` to the search head cluster.
 
-**On mgmt-2:**
+### Indexer cluster (on mgmt-2)
+
 ```bash
-# Copy app to manager-apps
+# Move cluster indexer base to manager-apps
 sudo cp -r /tmp/pait_cluster_indexer_base /opt/splunk/etc/manager-apps/
 sudo chown -R splunk:splunk /opt/splunk/etc/manager-apps/pait_cluster_indexer_base
 
-# Add pass4SymmKey — Splunk will encrypt it when bundle is pushed
-# Edit /opt/splunk/etc/manager-apps/pait_cluster_indexer_base/default/server.conf
-```
+# Copy pait_all_indexes to manager-apps
+vagrant scp ./splunk/apps/pait_all_indexes mgmt-2:/tmp/
+sudo cp -r /tmp/pait_all_indexes /opt/splunk/etc/manager-apps/
+sudo chown -R splunk:splunk /opt/splunk/etc/manager-apps/pait_all_indexes
 
-**Validate and push the configuration bundle:**
-```bash
+# Validate and push bundle to indexers
 sudo -u splunk /opt/splunk/bin/splunk validate cluster-bundle
-sudo -u splunk /opt/splunk/bin/splunk apply cluster-bundle
+sudo -u splunk /opt/splunk/bin/splunk apply cluster-bundle --answer-yes
 ```
 
-**Remove the bootstrap app from each indexer:**
+### Remove bootstrap app from each indexer
+
 ```bash
 # On idx-1 and idx-2
 sudo rm -rf /opt/splunk/etc/apps/pait_cluster_indexer_base
 sudo systemctl restart Splunkd
 ```
 
-After restart the indexers pull the configuration from the CM bundle. Verify peers are still healthy in the Cluster Manager UI.
+### Search head cluster (on mgmt-1)
+
+```bash
+vagrant scp ./splunk/apps/pait_all_search_indexes mgmt-1:/tmp/
+sudo cp -r /tmp/pait_all_search_indexes /opt/splunk/etc/shcluster/apps/
+sudo chown -R splunk:splunk /opt/splunk/etc/shcluster/apps/pait_all_search_indexes
+sudo -u splunk /opt/splunk/bin/splunk apply shcluster-bundle \
+  -target https://192.168.248.207:8089 \
+  --answer-yes
+```
+
+**Verify indexes visible on search heads:**
+
+Navigate to **Settings → Indexes** on any search head — `linux_audit`, `linux_logs`, and `nginx_access` should appear with autocomplete working in the search bar.
 
 ---
 
-## Step 6 — Verify License Manager
-
-The `[license]` stanza in `server.conf` points both indexers to mgmt-2 as the License Manager. Verify from the CLI:
+## Step 8 — Verify License Manager
 
 **On mgmt-2 — list license peers:**
 ```bash
@@ -278,36 +370,57 @@ sudo -u splunk /opt/splunk/bin/splunk show-decrypted \
 
 ---
 
+## Adding New Indexes
+
+When adding a new index to the environment always update both apps:
+
+1. Add stanza to `pait_all_indexes/default/indexes.conf` with size and retention settings
+2. Add empty stanza to `pait_all_search_indexes/default/indexes.conf`
+3. Deploy `pait_all_indexes` to indexer cluster — mgmt-2 `manager-apps` → validate → apply bundle
+4. Deploy `pait_all_search_indexes` to search head cluster — mgmt-1 `shcluster/apps` → apply bundle
+
+---
+
 ## Troubleshooting
 
-**Peers not registering after start:**
-Check `pass4SymmKey` matches between the CM and the indexers. Check `manager_uri` is correct and port 8089 is reachable.
+**Search head crashes on startup after deploying index app:**
+The index app deployed to search heads contains volume references (`volume:hot_tier`) that cannot be resolved because `/opt/splunkdata` does not exist on search heads. Remove the app from `shcluster/apps` on the deployer, push an empty bundle to clear it from the search heads, then deploy `pait_all_search_indexes` instead which uses `$SPLUNK_DB` variables.
 
+**503 error when applying shcluster-bundle:**
+The SHC captain is temporarily unavailable — typically occurs after manually stopping and restarting search heads. Wait 30-60 seconds for captain re-election to complete and retry. The bundle push will succeed once a captain is elected.
+
+**`Cannot load IndexConfig: Required parameter=homePath not configured`:**
+An index stanza is present without path settings and no `[default]` stanza to inherit from. Ensure `pait_all_search_indexes` includes the `[default]` stanza with `$SPLUNK_DB` paths.
+
+**Peers not registering after start:**
+Check `pass4SymmKey` matches between CM and indexers. Check `manager_uri` is correct and port 8089 is reachable.
 ```bash
 sudo tail -100 /opt/splunk/var/log/splunk/splunkd.log | grep -i "cluster\|peer\|manager"
 ```
 
 **Bundle push fails:**
-Validate the bundle first — validation errors will show the specific config problem:
+Validate first:
 ```bash
 sudo -u splunk /opt/splunk/bin/splunk validate cluster-bundle
 ```
 
 **Peers go down after bundle push:**
-Check that the app deployed via bundle does not conflict with any app already in `etc/apps` on the indexers. Remove any duplicate apps from `etc/apps` on the indexers and restart.
+Check for duplicate apps in `etc/apps` on the indexers conflicting with apps in the bundle. Remove duplicates and restart.
 
 **Encrypted pass4SymmKey looks different across nodes:**
-This is expected and correct. Splunk uses non-deterministic encryption — the same plaintext encrypted multiple times produces different ciphertext. Use `show-decrypted` to verify all nodes decrypt to the same plaintext value.
+Expected and correct. Splunk uses non-deterministic encryption. Use `show-decrypted` to verify all nodes decrypt to the same plaintext value.
 
 **License peers not showing in UI:**
-The UI may take a few minutes to reflect connected peers. Use `splunk list licenser-slaves` on the CLI for immediate verification.
+Use `splunk list licenser-slaves` on the CLI for immediate verification. The UI may take a few minutes to update.
 
 ---
 
 ## Notes
 
-- Apps in `manager-apps` are never run locally on the Cluster Manager — they are only distributed to peers via the configuration bundle
-- Always validate the bundle before applying — `validate cluster-bundle` catches errors before they reach the peers
-- Do not use `splunk restart` on peer nodes once replication has begun — use `systemctl restart Splunkd` or `splunk offline` followed by `splunk start` for safe restarts
-- The bootstrap app in `etc/apps` on each indexer should be removed once the app is established in `manager-apps` — having it in both places can cause configuration conflicts
-- `pass4SymmKey` in cleartext in a config file will be automatically encrypted by Splunk on next start — this is the correct way to set it initially
+- Never deploy `pait_all_indexes` to search heads — it will crash Splunk on startup due to unresolvable volume references
+- `pait_all_search_indexes` is the correct app for search heads — uses `$SPLUNK_DB` and `$_index_name` variables
+- When adding new indexes always update both apps and redeploy to both tiers
+- Apps in `manager-apps` are never run locally on the Cluster Manager — only distributed to peers via bundle
+- Always validate the indexer cluster bundle before applying
+- Do not use `splunk restart` on peer nodes once replication has begun — use `systemctl restart Splunkd`
+- `pass4SymmKey` in cleartext will be automatically encrypted by Splunk on next start

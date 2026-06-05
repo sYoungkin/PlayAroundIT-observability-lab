@@ -227,6 +227,67 @@ This is tracked in `docs/issues-and-improvements.md`.
 
 ---
 
+## UF Configuration Apps via Agent Management
+
+### Server Class: pait_linux_universal_forwarders
+
+The following apps are assigned to the `pait_linux_universal_forwarders` server class
+and automatically deployed to all Linux Universal Forwarders:
+
+| App | Purpose |
+|---|---|
+| `pait_all_deploymentclient` | Points UF to Agent Management server |
+| `pait_uf_outputs` | Configures forwarding to indexer cluster via indexer discovery |
+| `Splunk_TA_effective_configuration` | Enables viewing running config from Agent Management UI |
+
+### Deploying Splunk_TA_effective_configuration
+
+1. Download `Splunk_TA_effective_configuration` from Splunkbase on your Windows machine
+2. SCP to mgmt-1:
+```bash
+vagrant scp Splunk_TA_effective_configuration.tgz mgmt-1:/tmp/
+```
+3. On mgmt-1 — unpack and place in deployment-apps:
+```bash
+cd /tmp
+tar -xzf Splunk_TA_effective_configuration.tgz
+# remove all undeeded OS folders
+sudo cp -r Splunk_TA_effective_configuration /opt/splunk/etc/deployment-apps/
+sudo chown -R splunk:splunk \
+  /opt/splunk/etc/deployment-apps/Splunk_TA_effective_configuration
+```
+4. Add to `pait_linux_universal_forwarders` server class in Agent Management UI
+5. Reload deploy server:
+```bash
+sudo -u splunk /opt/splunk/bin/splunk reload deploy-server
+```
+6. After next phone home cycle verify under **Agent Management → Forwarders → uf-1 → Effective Configuration**
+
+### Known Issue — Cleartext pass4SymmKey in deployment-apps
+
+The `pass4SymmKey` for indexer discovery in `pait_uf_outputs/default/outputs.conf`
+is stored in cleartext in the `deployment-apps` staging directory on mgmt-1.
+Splunk does not auto-encrypt values in deployment-apps. The value is encrypted
+on the UF side when Splunk writes it to the running config.
+
+Mitigation — restrict permissions on the specific file containing the sensitive value:
+
+```bash
+sudo chmod 600 /opt/splunk/etc/deployment-apps/pait_uf_outputs/default/outputs.conf
+sudo chmod 600 /opt/splunk/etc/deployment-apps/pait_uf_outputs/local/outputs.conf
+```
+
+This sets the file to owner read/write only — group and others have no access.
+Note: `chmod` on a directory does not apply to files inside it — the file itself
+must be explicitly chmod'd.
+
+Whenever `pait_uf_outputs/outputs.conf` is updated and redeployed to mgmt-1,
+reapply the chmod to ensure permissions are not reset.
+
+This is also tracked in `docs/issues-and-improvements.md`.
+
+---
+
 ## Notes
 
 - Agent Management does not require explicit activation — any Splunk Enterprise instance assumes the role as soon as agents phone home to it
