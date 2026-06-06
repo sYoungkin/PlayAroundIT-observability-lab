@@ -29,8 +29,8 @@ Vagrant.configure("2") do |config|
   config.vm.define "elastic" do |subconfig|
     subconfig.vm.hostname = "elastic"
     subconfig.vm.provider "vmware_desktop" do |v|
-      v.cpus   = 1
-      v.memory = 2048
+      v.cpus   = 2
+      v.memory = 4096
     end
     subconfig.vm.provision "file",
       source:      "../.ssh/ansible_lab",

@@ -8,6 +8,7 @@
   hosts: lab_all
   become: true
   gather_facts: true
+
 # ----------------------------------------
 #  Play 1 - Distribute Elasticsearch CA
 #  cert to all Splunk nodes
@@ -97,6 +98,68 @@
       command: metricbeat modules enable linux
       args:
         creates: /etc/metricbeat/modules.d/linux.yml
+
+    - name: Configure system module with additional metricsets
+      copy:
+        dest: /etc/metricbeat/modules.d/system.yml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          - module: system
+            period: 10s
+            metricsets:
+              - cpu
+              - load
+              - memory
+              - network
+              - process
+              - process_summary
+              - socket_summary
+              - diskio
+              - core
+              - entropy
+              - service
+            process.include_top_n:
+              by_cpu: 5
+              by_memory: 5
+            degrade_on_partial: false
+
+          - module: system
+            period: 1m
+            metricsets:
+              - filesystem
+              - fsstat
+            processors:
+              - drop_event.when.regexp:
+                  system.filesystem.mount_point: '^/(sys|cgroup|proc|dev|etc|host|lib|snap)($|/)'
+
+          - module: system
+            period: 5m
+            metricsets:
+              - uptime
+
+    - name: Configure linux module with all metricsets
+      copy:
+        dest: /etc/metricbeat/modules.d/linux.yml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          - module: linux
+            period: 10s
+            metricsets:
+              - pageinfo
+              - memory
+              - iostat
+              - conntrack
+              - pressure
+            enabled: true
+
+    - name: Restart Metricbeat to apply module changes
+      systemd:
+        name: metricbeat
+        state: restarted
 
     - name: Enable beat-xpack module
       command: metricbeat modules enable beat-xpack
