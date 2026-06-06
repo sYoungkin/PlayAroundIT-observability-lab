@@ -190,6 +190,69 @@ Reference: Splunk official CLI commands for search head clustering (10.4)
 
 ---
 
+## App Context and Indexer Deployment — Important Gotcha
+
+Any app that contains saved searches, reports, or is used as a search context
+must exist on **both** the search head cluster and the indexer cluster — even
+if the app has no indexer-specific configuration.
+
+### Why This Is Required
+
+When a search runs from within a specific app context, Splunk dispatches parts
+of the search to the indexers. The indexers execute their portion in the **same
+app context** as the search head. If the app does not exist on the indexer,
+the search process fails with:
+
+```bash
+exit_code=111, description="exited with error: Application does not exist: <app_name>"
+```
+
+This happens even if the app has `export = system` in `app.conf` and even if
+the search contains no app-specific knowledge objects.
+
+### The Rule
+
+| App contains | Search heads | Indexers |
+|---|---|---|
+| Saved searches / reports | Required | Required (stub minimum) |
+| Dashboards only | Required | Required (stub minimum) |
+| Field extractions / lookups | Required | Required (full deployment) |
+| Inputs | Not required | Required (inputs disabled) |
+
+A **stub** deployment means the app only needs `app.conf` on the indexers —
+no inputs, no lookups, no dashboards. Just enough for the indexers to
+recognise the app context.
+
+### Deploying a Stub to the Indexer Cluster
+
+```bash
+# On mgmt-2 — copy app to manager-apps
+sudo cp -r /tmp/<app_name> /opt/splunk/etc/manager-apps/
+sudo chown -R splunk:splunk /opt/splunk/etc/manager-apps/<app_name>
+
+# Validate and push bundle
+sudo -u splunk /opt/splunk/bin/splunk validate cluster-bundle
+sudo -u splunk /opt/splunk/bin/splunk apply cluster-bundle --answer-yes
+```
+
+The indexers only need the `default/app.conf` and `metadata/` files.
+Everything else (dashboards, saved searches, panels) can be omitted from
+the indexer deployment.
+
+### Verifying the App Exists on Indexers
+
+After the bundle push confirm the app is present on the indexers:
+
+```bash
+# SSH into idx-1 or idx-2
+ls /opt/splunk/etc/apps/ | grep <app_name>
+```
+
+If the app is missing from the indexer the search will fail with exit code 111
+regardless of the search head configuration.
+
+---
+
 ## Quick Reference — Agent Management Commands
 
 | Command | Node | Purpose |
