@@ -1,0 +1,54 @@
+---
+# ============================================
+#  Load Testing Tools Installation
+#  Installs stress-ng, fio, iperf3, sysbench
+#  on all lab nodes
+# ============================================
+
+- name: Install load testing tools on all nodes
+  hosts: lab_all
+  become: true
+
+  tasks:
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install load testing tools
+      apt:
+        name:
+          - stress-ng
+          - fio
+          - iperf3
+          - sysbench
+        state: present
+
+    - name: Verify stress-ng is installed
+      command: stress-ng --version
+      register: stressng_version
+      changed_when: false
+
+    - name: Verify fio is installed
+      command: fio --version
+      register: fio_version
+      changed_when: false
+
+    - name: Verify iperf3 is installed
+      command: iperf3 --version
+      register: iperf3_version
+      changed_when: false
+
+    - name: Verify sysbench is installed
+      command: sysbench --version
+      register: sysbench_version
+      changed_when: false
+
+    - name: Show installed versions
+      debug:
+        msg:
+          - "stress-ng: {{ stressng_version.stdout }}"
+          - "fio: {{ fio_version.stdout }}"
+          - "iperf3: {{ iperf3_version.stdout_lines[0] }}"
+          - "sysbench: {{ sysbench_version.stdout }}"

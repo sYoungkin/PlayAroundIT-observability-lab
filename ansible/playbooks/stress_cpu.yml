@@ -1,0 +1,22 @@
+---
+- name: CPU Stress Test
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+
+  vars:
+    cpu_workers: "{{ workers | default(1) }}"
+    duration: "{{ test_duration | default('60s') }}"
+
+  tasks:
+    - name: Run CPU stress test
+      command: >
+        stress-ng --cpu {{ cpu_workers }}
+        --timeout {{ duration }}
+        --metrics-brief
+      async: 120
+      poll: 5
+      register: stress_result
+
+    - name: Show stress results
+      debug:
+        var: stress_result.stdout_lines

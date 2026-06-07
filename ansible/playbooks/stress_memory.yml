@@ -1,0 +1,42 @@
+---
+# ============================================
+#  Memory Stress Test
+#  Usage:
+#  ansible-playbook playbooks/stress_memory.yml \
+#    -e "target_hosts=idx-1 workers=1 mem_percent=80 test_duration=60s"
+# ============================================
+
+- name: Memory Stress Test
+  hosts: "{{ target_hosts | default('all') }}"
+  become: true
+
+  vars:
+    mem_workers: "{{ workers | default(1) }}"
+    duration: "{{ test_duration | default('60s') }}"
+    memory_percent: "{{ mem_percent | default(70) }}"
+
+  tasks:
+
+    - name: Get total RAM on target
+      command: free -m
+      register: mem_info
+      changed_when: false
+
+    - name: Show current memory state
+      debug:
+        msg: "{{ mem_info.stdout_lines }}"
+
+    - name: Run memory stress test
+      command: >
+        stress-ng --vm {{ mem_workers }}
+        --vm-bytes {{ memory_percent }}%
+        --timeout {{ duration }}
+        --metrics-brief
+        --verbose
+      async: 180
+      poll: 10
+      register: stress_result
+
+    - name: Show stress results
+      debug:
+        var: stress_result.stdout_lines

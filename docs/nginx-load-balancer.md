@@ -53,7 +53,7 @@ upstream splunk_search_heads {
 }
 
 server {
-    listen 8000;
+    listen 80;
     server_name playaroundit-shc;
 
     location / {
@@ -126,7 +126,7 @@ echo "<uf1_ip> playaroundit-shc" | sudo tee -a /etc/hosts
 
 | URL | Destination | Purpose |
 |---|---|---|
-| `http://playaroundit-shc:8000` | nginx → sh-1 or sh-2 | Search Head Cluster UI |
+| `http://playaroundit-shc` | nginx → sh-1 or sh-2 | Search Head Cluster UI |
 | `http://<mgmt1_ip>:8000` | mgmt-1 directly | Deployment Server / SH Deployer UI |
 | `http://<mgmt2_ip>:8000` | mgmt-2 directly | Cluster Manager / License Manager / Monitoring Console UI |
 

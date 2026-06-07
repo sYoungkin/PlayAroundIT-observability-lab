@@ -1,0 +1,108 @@
+---
+# ============================================
+#  Add Splunk Index
+#  Usage:
+#  ansible-playbook playbooks/splunk_add_index.yml \
+#    -e "index_name=my_index \
+#        retention_days=30 \
+#        max_size_mb=5120"
+# ============================================
+
+- name: Add index to pait_all_indexes (indexer cluster)
+  hosts: mgmt-2
+  become: true
+
+  vars:
+    index_name: "{{ index_name }}"
+    retention_days: "{{ retention_days | default(30) }}"
+    max_size_mb: "{{ max_size_mb | default(5120) }}"
+    retention_secs: "{{ (retention_days | int) * 86400 }}"
+    indexes_conf: /opt/splunk/etc/manager-apps/pait_all_indexes/default/indexes.conf
+
+  tasks:
+
+    - name: Check index does not already exist
+      command: grep -c "^\[{{ index_name }}\]" {{ indexes_conf }}
+      register: index_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if index already exists
+      fail:
+        msg: "Index {{ index_name }} already exists in {{ indexes_conf }}"
+      when: index_exists.stdout | int > 0
+
+    - name: Add index stanza to pait_all_indexes
+      blockinfile:
+        path: "{{ indexes_conf }}"
+        block: |
+          [{{ index_name }}]
+          maxTotalDataSizeMB = {{ max_size_mb }}
+          frozenTimePeriodInSecs = {{ retention_secs }}
+        marker: "# {mark} INDEX {{ index_name }}"
+
+    - name: Validate CM bundle
+      command: /opt/splunk/bin/splunk validate cluster-bundle
+      become_user: splunk
+
+    - name: Apply CM bundle
+      command: /opt/splunk/bin/splunk apply cluster-bundle --answer-yes
+      become_user: splunk
+
+- name: Add index to pait_all_search_indexes (search head cluster)
+  hosts: mgmt-1
+  become: true
+
+  vars:
+    index_name: "{{ index_name }}"
+    search_indexes_conf: /opt/splunk/etc/shcluster/apps/pait_all_search_indexes/default/indexes.conf
+
+  tasks:
+
+    - name: Check index does not already exist
+      command: grep -c "^\[{{ index_name }}\]" {{ search_indexes_conf }}
+      register: index_exists_sh
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if index already exists on SH
+      fail:
+        msg: "Index {{ index_name }} already exists in {{ search_indexes_conf }}"
+      when: index_exists_sh.stdout | int > 0
+
+    - name: Add index stanza to pait_all_search_indexes
+      blockinfile:
+        path: "{{ search_indexes_conf }}"
+        block: |
+          [{{ index_name }}]
+        marker: "# {mark} INDEX {{ index_name }}"
+
+    - name: Apply SHC bundle
+      command: >
+        /opt/splunk/bin/splunk apply shcluster-bundle
+        -target https://192.168.248.207:8089
+        --answer-yes
+      become_user: splunk
+
+- name: Confirm index is visible
+  hosts: mgmt-2
+  become: true
+
+  tasks:
+
+    - name: Wait for bundle to propagate
+      pause:
+        seconds: 15
+
+    - name: Confirm index exists on indexers
+      command: >
+        /opt/splunk/bin/splunk search
+        "| eventcount summarize=false index={{ index_name }}"
+        -auth admin:adminuser123!
+      become_user: splunk
+      register: confirm_result
+      failed_when: false
+
+    - name: Show confirmation
+      debug:
+        msg: "Index {{ index_name }} successfully created and deployed to both tiers"
