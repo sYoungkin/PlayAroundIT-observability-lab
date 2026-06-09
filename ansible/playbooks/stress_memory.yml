@@ -30,6 +30,7 @@
       command: >
         stress-ng --vm {{ mem_workers }}
         --vm-bytes {{ memory_percent }}%
+        --vm-keep
         --timeout {{ duration }}
         --metrics-brief
         --verbose
