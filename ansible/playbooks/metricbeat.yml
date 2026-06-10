@@ -14,7 +14,7 @@
 #  cert to all Splunk nodes
 # ----------------------------------------
 - name: Distribute Elasticsearch CA certificate to Splunk nodes
-  hosts: splunk_all
+  hosts: lab_all:!elastic
   become: true
 
   tasks:

@@ -1,4 +1,5 @@
 # Elasticsearch connection
+# Set elasticsearch_host IP later for --limit use (otherwise problem with gathering facts) 
 elasticsearch_host: "{{ hostvars['elastic']['ansible_default_ipv4']['address'] }}"
 elasticsearch_port: 9200
 elasticsearch_username: "elastic"
