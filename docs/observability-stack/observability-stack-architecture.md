@@ -146,16 +146,16 @@ The following components are already deployed and collecting data:
 
 ### Phase 1 — Prometheus (current)
 
-- [ ] Install Prometheus on obs node
-- [ ] Configure Prometheus for remote write
-- [ ] Verify Prometheus is scraping metrics
-- [ ] Connect Grafana to Prometheus datasource
+- [x] Install Prometheus on obs node
+- [x] Configure Prometheus for remote write
+- [x] Verify Prometheus is scraping metrics
+- [x] Connect Grafana to Prometheus datasource
 
 ### Phase 2 — Grafana
 
-- [ ] Install Grafana on obs node
-- [ ] Configure Prometheus datasource
-- [ ] Import node exporter dashboards
+- [x] Install Grafana on obs node
+- [x] Configure Prometheus datasource
+- [x] Import node exporter dashboards
 - [ ] Build custom lab infrastructure dashboard
 
 ### Phase 3 — Jaeger
