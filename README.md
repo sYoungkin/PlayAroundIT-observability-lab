@@ -67,21 +67,18 @@ reference material in Notion.
 
 ## Repository Structure
 
-```
-/vagrant        → Vagrantfile and provisioning shell scripts
+\`\`\`
+/ansible        → Ansible playbooks and roles for infrastructure config management
 /docs           → Architecture notes, decisions, lessons learned (numbered by build order)
-/splunk         → Splunk config files, apps, inputs/outputs
-/elastic        → Elasticsearch and Kibana configuration
 /scripts        → Utility and automation scripts
+/splunk/apps    → Custom Splunk apps (deployed via deployment server / cluster bundle / SH deployer)
+/vagrant        → Vagrantfile and provisioning shell scripts
+.gitignore
 README.md
-```
+\`\`\`
 
-> Note: this section reflects the original repo layout. If an `/ansible` directory
-> (or equivalent) or other top-level folders have been added since, worth updating
-> this list to match.
-
-`docs/` is organized with numbered filenames reflecting build order, with an
-`observability-stack/` subfolder specifically for the OTel/Prometheus/Jaeger work.
+\`docs/\` is organized with numbered filenames reflecting build order, with an
+\`observability-stack/\` subfolder specifically for the OTel/Prometheus/Jaeger work.
 Living reference material (milestones, open issues, IP reference, architecture
 diagram) is kept unnumbered.
 
